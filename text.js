@@ -9,8 +9,12 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
 import multer from "multer";
+import dotenv from 'dotenv';
 
-const genAI = new GoogleGenerativeAI("AIzaSyDpF5tCp4je2A9lyuJc9m9mgZFgdN-Uglw");
+// Load environment variables
+dotenv.config();
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -20,7 +24,7 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// Swagger configuration
+// Update Swagger configuration to use env variable
 const swaggerOptions = {
   definition: {
     openapi: "3.0.0",
@@ -31,8 +35,8 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: "http://localhost:5000",
-        description: "Development server",
+        url: process.env.SWAGGER_SERVER_URL || "http://localhost:5000",
+        description: "API Server",
       },
     ],
   },
@@ -44,7 +48,10 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 // Configure multer for file upload
 const upload = multer({
-  dest: "uploads/",
+  dest: process.env.UPLOAD_DIR || 'uploads/',
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024 // 10MB default
+  },
   fileFilter: (req, file, cb) => {
     if (file.mimetype === "application/pdf") {
       cb(null, true);
@@ -345,6 +352,7 @@ app.post("/generate-mcqs", async (req, res) => {
 });
 
 // ✅ Start server
-app.listen(5000, () => {
-  console.log("🚀 Server running on http://localhost:5000");
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
