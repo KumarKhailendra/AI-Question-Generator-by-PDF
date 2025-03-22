@@ -63,13 +63,27 @@ let currentPdfPath = null; // Store the path of the currently loaded PDF
 
 // ✅ Extract text from PDF
 async function extractTextFromPDF(pdfPath) {
-  if (!fs.existsSync(pdfPath)) {
-    console.error("❌ Error: PDF file not found at", pdfPath);
-    process.exit(1);
+  try {
+    if (!fs.existsSync(pdfPath)) {
+      throw new Error(`PDF file not found at ${pdfPath}`);
+    }
+
+    const dataBuffer = fs.readFileSync(pdfPath);
+    
+    try {
+      const data = await pdfParse(dataBuffer);
+      if (!data || !data.text) {
+        throw new Error('Failed to extract text from PDF');
+      }
+      return data.text;
+    } catch (parseError) {
+      console.error('PDF Parse Error:', parseError);
+      throw new Error('Failed to parse PDF file');
+    }
+  } catch (error) {
+    console.error('PDF Reading Error:', error);
+    throw error; // Propagate error up
   }
-  const dataBuffer = fs.readFileSync(pdfPath);
-  const data = await pdfParse(dataBuffer);
-  return data.text;
 }
 
 async function generateMCQs(pdfText, question, retryCount = 1) {
@@ -204,13 +218,26 @@ Important:
  *       500:
  *         description: Server error
  */
-app.post("/upload-pdf", upload.single("pdf"), (req, res) => {
+app.post("/upload-pdf", upload.single("pdf"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
-    currentPdfPath = req.file.path;
-    res.json({ message: "PDF uploaded successfully", path: req.file.path });
+
+    // Validate PDF by trying to read it
+    try {
+      await extractTextFromPDF(req.file.path);
+      currentPdfPath = req.file.path;
+      res.json({ message: "PDF uploaded successfully", path: req.file.path });
+    } catch (error) {
+      // Delete invalid PDF
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkError) {
+        console.error("Error deleting invalid PDF:", unlinkError);
+      }
+      throw new Error("Invalid or corrupted PDF file");
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -270,23 +297,40 @@ app.post("/generate-mcqs", async (req, res) => {
   try {
     const { message } = req.body;
     console.log("Received question:", message);
-
+    
     if (!currentPdfPath) {
       return res.status(400).json({ error: "Please upload a PDF file first" });
     }
 
-    const text = await extractTextFromPDF(currentPdfPath);
-    console.log("Extracted text length:", text.length);
-
-    const mcqs = await generateMCQs(text, message);
-    console.log("Generated MCQs:", JSON.stringify(mcqs, null, 2));
-
-    // Update validation to use dynamic length check
-    if (!mcqs || !Array.isArray(mcqs)) {
-      throw new Error("Invalid MCQ generation result");
+    if (!fs.existsSync(currentPdfPath)) {
+      return res.status(404).json({ error: "PDF file no longer exists. Please upload again." });
     }
 
-    res.json({ mcqs });
+    try {
+      const text = await extractTextFromPDF(currentPdfPath);
+      if (!text || text.trim().length === 0) {
+        return res.status(400).json({ error: "Could not extract text from PDF" });
+      }
+
+      console.log("Extracted text length:", text.length);
+      const mcqs = await generateMCQs(text, message);
+      console.log("Generated MCQs:", JSON.stringify(mcqs, null, 2));
+
+      if (!mcqs || !Array.isArray(mcqs)) {
+        throw new Error("Invalid MCQ generation result");
+      }
+
+      res.json({ mcqs });
+    } catch (error) {
+      // Delete corrupt/invalid PDF file
+      try {
+        fs.unlinkSync(currentPdfPath);
+        currentPdfPath = null;
+      } catch (unlinkError) {
+        console.error("Error deleting invalid PDF:", unlinkError);
+      }
+      throw error;
+    }
   } catch (error) {
     console.error("Error in generate-mcqs:", error);
     res.status(500).json({ error: error.message });
