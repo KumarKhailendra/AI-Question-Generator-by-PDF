@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import fs from "fs";
-import pdfParse from "pdf-parse";
+import pdfParse from "pdf-parse/lib/pdf-parse.js"; // Change the import to use direct file
 import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -69,20 +69,27 @@ async function extractTextFromPDF(pdfPath) {
     }
 
     const dataBuffer = fs.readFileSync(pdfPath);
+    let pdfData = null;
     
     try {
-      const data = await pdfParse(dataBuffer);
-      if (!data || !data.text) {
-        throw new Error('Failed to extract text from PDF');
-      }
-      return data.text;
+      pdfData = await pdfParse(dataBuffer, {
+        // Add options to skip test file check
+        version: 'default',
+        max: 0,
+      });
     } catch (parseError) {
       console.error('PDF Parse Error:', parseError);
       throw new Error('Failed to parse PDF file');
     }
+
+    if (!pdfData || !pdfData.text) {
+      throw new Error('Failed to extract text from PDF');
+    }
+
+    return pdfData.text;
   } catch (error) {
     console.error('PDF Reading Error:', error);
-    throw error; // Propagate error up
+    throw error;
   }
 }
 
